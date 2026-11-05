@@ -1,0 +1,5 @@
+name: crud-management
+
+include:
+  - path: crud-management/docker-compose.yml
+

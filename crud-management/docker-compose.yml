@@ -1,0 +1,106 @@
+services:
+  # ========================================================
+  # 1. Database Tier: PostgreSQL 16 Alpine
+  # ========================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: crud-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-crud_db}
+      POSTGRES_USER: ${POSTGRES_USER:-crud_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crud_secure_pass_2026}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - crud-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-crud_user} -d ${POSTGRES_DB:-crud_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ========================================================
+  # 2. Application Tier: Spring Boot 3 + Java 21 Backend
+  # ========================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: crud-backend
+    container_name: crud-backend
+    restart: unless-stopped
+    environment:
+      DB_URL: ${DB_URL:-jdbc:postgresql://postgres:5432/crud_db}
+      DB_USERNAME: ${DB_USERNAME:-crud_user}
+      DB_PASSWORD: ${DB_PASSWORD:-crud_secure_pass_2026}
+      JPA_DDL_AUTO: ${JPA_DDL_AUTO:-update}
+      SHOW_SQL: ${SHOW_SQL:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - crud-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/actuator/health | grep UP || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+  # ========================================================
+  # 3. Presentation Tier: React 19 + MUI + Vite Frontend
+  # ========================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: crud-frontend
+    container_name: crud-frontend
+    restart: unless-stopped
+    networks:
+      - crud-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  # ========================================================
+  # 4. Gateway Tier: Nginx Reverse Proxy
+  # ========================================================
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    image: crud-nginx
+    container_name: crud-nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_PORT:-80}:80"
+    depends_on:
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    networks:
+      - crud-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+# ========================================================
+# Persistent Volumes & Network Definitions
+# ========================================================
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  crud-network:
+    driver: bridge
